@@ -12,6 +12,8 @@ Run locally:
 See README.md for deployment instructions (Render, Railway, Fly.io, etc).
 """
 
+import hashlib
+import hmac
 import json
 import os
 import sqlite3
@@ -593,8 +595,10 @@ fileImport.addEventListener('change', (e) => {
 
 document.getElementById('resetBtn').addEventListener('click', async () => {
   if (!confirm('Reset to the original transcribed register? All edits, additions, deletions, and custom fields will be lost for everyone (unless exported).')) return;
+  const password = prompt('This action is password-protected. Enter the reset password:');
+  if (password === null) return; // cancelled
   try {
-    await api('/reset', { method: 'POST' });
+    await api('/reset', { method: 'POST', body: JSON.stringify({ password }) });
     await loadAll();
   } catch (err) { alert(err.message); }
 });
@@ -814,6 +818,16 @@ def import_all():
 
 @app.route("/api/reset", methods=["POST"])
 def reset_all():
+    configured_hash = os.environ.get("RESET_PASSWORD_HASH", "")
+    if not configured_hash:
+        return jsonify({"error": "Reset is locked but no password is configured on the server. Set RESET_PASSWORD_HASH."}), 503
+
+    data = request.get_json(force=True, silent=True) or {}
+    supplied = str(data.get("password", ""))
+    supplied_hash = hashlib.sha256(supplied.encode("utf-8")).hexdigest()
+    if not supplied or not hmac.compare_digest(supplied_hash, configured_hash):
+        return jsonify({"error": "Incorrect password."}), 401
+
     db = get_db()
     db.execute("DELETE FROM records")
     db.execute("DELETE FROM custom_fields")

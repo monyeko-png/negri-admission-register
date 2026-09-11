@@ -12,8 +12,6 @@ Run locally:
 See README.md for deployment instructions (Render, Railway, Fly.io, etc).
 """
 
-import hashlib
-import hmac
 import json
 import os
 import sqlite3
@@ -232,7 +230,6 @@ INDEX_HTML = """<!DOCTYPE html>
   <button class="btn-ghost" id="fieldsBtn">Manage Fields</button>
   <button class="btn-ghost" id="exportBtn">Export JSON</button>
   <button class="btn-ghost" id="importBtn">Import JSON</button>
-  <button class="btn-ghost" id="resetBtn">Reset to Original</button>
   <input type="file" id="fileImport" accept="application/json">
 </div>
 
@@ -593,15 +590,6 @@ fileImport.addEventListener('change', (e) => {
   reader.readAsText(file);
 });
 
-document.getElementById('resetBtn').addEventListener('click', async () => {
-  if (!confirm('Reset to the original transcribed register? All edits, additions, deletions, and custom fields will be lost for everyone (unless exported).')) return;
-  const password = prompt('This action is password-protected. Enter the reset password:');
-  if (password === null) return; // cancelled
-  try {
-    await api('/reset', { method: 'POST', body: JSON.stringify({ password }) });
-    await loadAll();
-  } catch (err) { alert(err.message); }
-});
 
 async function loadAll() {
   const [fieldsResp, records] = await Promise.all([api('/fields'), api('/records')]);
@@ -816,34 +804,12 @@ def import_all():
     return jsonify({"imported_records": len(seen_no), "imported_fields": len(fields)})
 
 
-@app.route("/api/reset", methods=["POST"])
-def reset_all():
-    configured_hash = os.environ.get("RESET_PASSWORD_HASH", "")
-    if not configured_hash:
-        return jsonify({"error": "Reset is locked but no password is configured on the server. Set RESET_PASSWORD_HASH."}), 503
-
-    data = request.get_json(force=True, silent=True) or {}
-    supplied = str(data.get("password", ""))
-    supplied_hash = hashlib.sha256(supplied.encode("utf-8")).hexdigest()
-    if not supplied or not hmac.compare_digest(supplied_hash, configured_hash):
-        return jsonify({"error": "Incorrect password."}), 401
-
-    db = get_db()
-    db.execute("DELETE FROM records")
-    db.execute("DELETE FROM custom_fields")
-    db.commit()
-
-    if SEED_PATH.exists():
-        seed = json.loads(SEED_PATH.read_text(encoding="utf-8"))
-        for rec in seed:
-            db.execute(
-                "INSERT INTO records (admission_no, payload) VALUES (?, ?)",
-                (str(rec.get("no")), json.dumps(rec, ensure_ascii=False)),
-            )
-        db.commit()
-    return jsonify({"status": "reset"})
-
-
+# ---------------------------------------------------------------------------
+# Note: the old "/api/reset" endpoint (restore-to-seed-data) has been removed
+# entirely at the user's request, after a couple of accidental clicks wiped
+# out newly-imported data. There is now no way to bulk-wipe the database from
+# the UI or API — only individual record edits/deletes and full imports
+# (POST /api/import) remain, both of which are intentional, explicit actions.
 # ---------------------------------------------------------------------------
 
 init_db()
